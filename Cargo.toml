@@ -1,0 +1,8 @@
+[package]
+name = "rust-glium-tutorial"
+version = "0.1.0"
+authors = ["Thales Macedo Garitezi <tgaritezi@xerpa.com.br>"]
+
+[dependencies]
+glium = "0.20.0"
+image = "*"
