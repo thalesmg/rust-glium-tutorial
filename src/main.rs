@@ -8,7 +8,7 @@ mod teapot;
 fn main() {
     let mut events_loop = glutin::EventsLoop::new();
     let window = glutin::WindowBuilder::new();
-    let context = glutin::ContextBuilder::new();
+    let context = glutin::ContextBuilder::new().with_depth_buffer(24);
     let display = glium::Display::new(window, context, &events_loop).unwrap();
 
     let positions = glium::VertexBuffer::new(&display, &teapot::VERTICES).unwrap();
@@ -23,11 +23,17 @@ fn main() {
 
         out vec3 v_normal;
 
-        uniform mat4 matrix;
+        uniform mat4 matrix1;
+        uniform mat4 matrix2;
+        uniform mat4 matrix3;
+        uniform mat4 normalizer;
+        uniform mat4 perspective;
+        uniform mat4 dislocator;
 
         void main() {
+            mat4 matrix = matrix1 * matrix2 * matrix3 * normalizer;
             v_normal = transpose(inverse(mat3(matrix))) * normal;
-            gl_Position = matrix * vec4(position, 1.0);
+            gl_Position = (dislocator + perspective * matrix) * vec4(position, 1.0);
         }
     "#;
 
@@ -53,30 +59,92 @@ fn main() {
 
     let mut closed = false;
 
-    let mut t: f32 = 0.0;
+    let mut tetas: Vec<f32> = vec![0.0, 0.0, 0.0];
     let step = 0.02;
 
     while !closed {
-        t += step;
-        if t > 2.0 * std::f32::consts::PI {
-            t = 0.0;
+        for teta in tetas.iter_mut() {
+            *teta += step;
+            if teta > &mut (2.0 * std::f32::consts::PI) {
+                *teta = 0.0;
+            }
         }
+        let teta1 = tetas[0];
+        let teta2 = tetas[1];
+        let teta3 = tetas[2];
 
         let mut target = display.draw();
-        target.clear_color(0.0, 0.0, 1.0, 1.0);
+        target.clear_color_and_depth((0.0, 0.0, 1.0, 1.0), 1.0);
+
+        let normalizer = [
+            [0.01, 0.0, 0.0, 0.0],
+            [0.0, 0.01, 0.0, 0.0],
+            [0.0, 0.0, 0.01, 0.0],
+            [0.0, 0.0, 2.0, 1.0f32],
+        ];
+        let dislocator = [
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0f32],
+        ];
+        let matrix1 = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, teta1.cos(), teta1.sin(), 0.0],
+            [0.0, -teta1.sin(), teta1.cos(), 0.0],
+            [0.0, 0.0, 0.0, 1.0f32],
+        ];
+        let matrix2 = [
+            [teta2.cos(), 0.0, teta2.sin(), 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [-teta2.sin(), 0.0, teta2.cos(), 0.0],
+            [0.0, 0.0, 0.0, 1.0f32],
+        ];
+        let matrix3 = [
+            [teta3.cos(), teta3.sin(), 0.0, 0.0],
+            [-teta3.sin(), teta3.cos(), 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0f32],
+        ];
+
+        let perspective = {
+            let (width, height) = target.get_dimensions();
+            let aspect_ratio = height as f32 / width as f32;
+
+            let fov: f32 = 3.141592 / 3.0;
+            let zfar = 1024.0;
+            let znear = 0.1;
+
+            let f = 1.0 / (fov / 2.0).tan();
+
+            [
+                [f * aspect_ratio, 0.0, 0.0, 0.0],
+                [0.0, f, 0.0, 0.0],
+                [0.0, 0.0, (zfar + znear) / (zfar - znear), 1.0],
+                [0.0, 0.0, -(2.0 * zfar * znear) / (zfar - znear), 0.0]
+            ]
+        };
 
         let uniforms = uniform! {
-            matrix: [
-                [0.01 * t.cos(), 0.01 *t.sin(), 0.0, 0.0],
-                [0.01 * -t.sin(), 0.01 * t.cos(), 0.0, 0.0],
-                [0.0, 0.0, 0.01, 0.0],
-                [0.0, 0.0, 0.0, 1.0f32],
-            ],
+            matrix1: matrix1,
+            matrix2: matrix2,
+            matrix3: matrix3,
+            normalizer: normalizer,
+            perspective: perspective,
+            dislocator: dislocator,
             u_light: light,
         };
 
-        target.draw((&positions, &normals), &indices, &program, &uniforms,
-                    &Default::default()).unwrap();
+        let params = glium::DrawParameters {
+            depth: glium::Depth {
+                test: glium::draw_parameters::DepthTest::IfLess,
+                write: true,
+                .. Default::default()
+            },
+            .. Default::default()
+        };
+
+        target.draw((&positions, &normals), &indices, &program, &uniforms, &params).unwrap();
         target.finish().unwrap();
 
         events_loop.poll_events(|event| {
